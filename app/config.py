@@ -1,7 +1,21 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _normalize_db_url(url: str) -> str:
+    """Render/Heroku inject `postgres://...` or `postgresql://...` with no
+    driver. SQLAlchemy defaults to psycopg2 (sync) for those, which breaks
+    `create_async_engine`. Force the asyncpg driver here; the sync version
+    for Alembic is derived from this by stripping the +asyncpg suffix."""
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://") :]
+    if url.startswith("postgresql://"):
+        url = "postgresql+asyncpg://" + url[len("postgresql://") :]
+    if url.startswith("sqlite://") and not url.startswith("sqlite+"):
+        url = "sqlite+aiosqlite://" + url[len("sqlite://") :]
+    return url
 
 
 class Settings(BaseSettings):
@@ -15,6 +29,11 @@ class Settings(BaseSettings):
     at_shortcode: str = Field(default="*384*0#", alias="AT_SHORTCODE")
 
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def _normalize(cls, v: str) -> str:
+        return _normalize_db_url(v)
 
     @property
     def pepper_bytes(self) -> bytes:
